@@ -43,6 +43,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: android/app/build/outputs/apk/debug/*.apk
-          generate_release_notes: true
+          tag_name: v1.0.0
+          name: "TOTP 验证器 v1.0.0"
+          body: "TOTP 两步验证器 Android APK"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
