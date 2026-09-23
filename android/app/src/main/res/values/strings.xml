@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TOTP 验证器</string>
+    <string name="title_activity_main">TOTPApp</string>
+    <string name="package_name">com.totp.app</string>
+    <string name="custom_url_scheme">com.totp.app</string>
+</resources>
