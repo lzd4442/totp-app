@@ -43,6 +43,8 @@ jobs:
           ./gradlew assembleDebug
 
       - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           APK=$(find android -name "*.apk" -type f)
           gh release create v1.0.0 \
