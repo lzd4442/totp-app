@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -39,12 +42,10 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: android/app/build/outputs/apk/debug/*.apk
-          tag_name: v1.0.0
-          name: "TOTP 验证器 v1.0.0"
-          body: "TOTP 两步验证器 Android APK"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create GitHub Release
+        run: |
+          APK=$(find android -name "*.apk" -type f)
+          gh release create v1.0.0 \
+            --title "TOTP 验证器 v1.0.0" \
+            --notes "TOTP 两步验证器 Android APK" \
+            "$APK"
