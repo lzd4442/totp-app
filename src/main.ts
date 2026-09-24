@@ -13,6 +13,43 @@ interface Account {
   algorithm: string;
 }
 
+interface Template {
+  id: string;
+  name: string;
+  icon: string;
+  issuer: string;
+  labelHint: string;
+  digits: number;
+  period: number;
+  algorithm: string;
+}
+
+type View = 'list' | 'add' | 'edit';
+
+// ===================== 内置模板 =====================
+const TEMPLATES: Template[] = [
+  {
+    id: 'github',
+    name: 'GitHub',
+    icon: '🐙',
+    issuer: 'GitHub',
+    labelHint: 'zhangsan',
+    digits: 6,
+    period: 30,
+    algorithm: 'SHA1',
+  },
+  {
+    id: 'gitlab',
+    name: 'GitLab',
+    icon: '🦊',
+    issuer: 'GitLab',
+    labelHint: 'zhangsan',
+    digits: 6,
+    period: 30,
+    algorithm: 'SHA1',
+  },
+];
+
 // ===================== 存储 =====================
 const STORE_KEY = 'totp_accounts';
 
@@ -26,14 +63,17 @@ async function loadAccounts(): Promise<Account[]> {
 }
 
 async function saveAccounts(accounts: Account[]): Promise<void> {
+  // 注：@capacitor/preferences 在 Android 上存储于 app 私有目录，受系统沙盒保护
+  // 后续可接入原生 KeyStore 插件实现更强加密
   await Preferences.set({ key: STORE_KEY, value: JSON.stringify(accounts) });
 }
 
 // ===================== UI 状态 =====================
 let accounts: Account[] = [];
-let editingId: string | null = null;
+let currentView: View = 'list';
+let currentEditId: string | null = null;
 
-// ===================== TOTP 生成 =====================
+// ===================== TOTP =====================
 function generateTOTP(account: Account): string {
   try {
     const totp = new OTP.TOTP({
@@ -58,16 +98,17 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ===================== 渲染：账号列表 =====================
+// ===================== 渲染入口 =====================
 function render() {
   const app = document.getElementById('app')!;
+  if (currentView === 'list') renderList(app);
+  else if (currentView === 'add') renderAdd(app);
+  else if (currentView === 'edit') renderEdit(app);
+}
+
+// ===================== 视图：账号列表 =====================
+function renderList(app: HTMLElement) {
   const timeLeft = getTimeLeft();
-
-  if (editingId !== null) {
-    renderEdit(app);
-    return;
-  }
-
   const progress = timeLeft / 30;
   const ringColor = timeLeft <= 5 ? '#b3261e' : timeLeft <= 10 ? '#c78100' : '#2e7d32';
 
@@ -79,10 +120,20 @@ function render() {
   `;
 
   if (accounts.length === 0) {
+    // 空状态
     html += `
       <div class="empty">
-        <p>暂无账号</p>
-        <p>点击下方添加按钮开始</p>
+        <div class="empty-icon">🔐</div>
+        <div class="empty-title">还没有验证码</div>
+        <div class="empty-sub">选择下面的模板快速添加</div>
+        <div class="template-grid">
+          ${TEMPLATES.map(t => `
+            <button class="template-btn" data-template="${t.id}">
+              <span class="tpl-icon">${t.icon}</span>
+              <span>${t.name}</span>
+            </button>
+          `).join('')}
+        </div>
       </div>
     `;
   } else {
@@ -90,16 +141,20 @@ function render() {
       const code = generateTOTP(acc);
       const formatted = code.replace(/(.{3})/g, '$1 ').trim();
       html += `
-        <div class="card" id="card-${acc.id}">
-          <div class="card-left">
-            <div class="issuer">${escapeHtml(acc.issuer || acc.label)}</div>
-            <div class="label">${escapeHtml(acc.label)}</div>
+        <div class="card" data-id="${acc.id}">
+          <div class="card-body">
+            <div class="card-left">
+              <div class="issuer">${escapeHtml(acc.issuer)}</div>
+              <div class="label">${escapeHtml(acc.label)}</div>
+            </div>
+            <div class="code-block">
+              <div class="code" id="code-${acc.id}">${formatted}</div>
+              <div class="copy-hint" id="hint-${acc.id}">点击复制</div>
+            </div>
           </div>
-          <div class="code-block">
-            <div class="code" id="code-${acc.id}">${formatted}</div>
-            <div class="copy-hint">点击复制</div>
+          <div class="card-edit" id="edit-${acc.id}">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </div>
-          <button class="delete-btn" id="del-${acc.id}">✕</button>
         </div>
       `;
     }
@@ -107,7 +162,6 @@ function render() {
 
   html += `</div>`;
 
-  // 有账号才显示进度条
   if (accounts.length > 0) {
     html += `
       <div class="progress-bar-wrap">
@@ -123,55 +177,76 @@ function render() {
 
   app.innerHTML = html;
 
-  for (const acc of accounts) {
-    document.getElementById(`card-${acc.id}`)!.onclick = () => copyCode(acc.id);
-    document.getElementById(`del-${acc.id}`)!.onclick = (e) => {
-      e.stopPropagation();
-      deleteAccount(acc.id);
-    };
+  // 事件绑定
+  document.getElementById('addbtn')!.onclick = () => { currentView = 'add'; render(); };
+
+  if (accounts.length === 0) {
+    for (const t of TEMPLATES) {
+      document.querySelector(`[data-template="${t.id}"]`)!.addEventListener('click', () => startAddTemplate(t));
+    }
+  } else {
+    for (const acc of accounts) {
+      document.querySelector(`[data-id="${acc.id}"]`)!.addEventListener('click', (e) => {
+        (e.target as HTMLElement).closest('.card-edit')
+          ? openEdit(acc.id)
+          : copyCode(acc.id);
+      });
+    }
   }
-  document.getElementById('addbtn')!.onclick = () => {
-    editingId = 'new';
-    render();
-  };
 }
 
 function copyCode(id: string) {
   const acc = accounts.find(a => a.id === id);
   if (!acc) return;
   const code = generateTOTP(acc);
-  navigator.clipboard.writeText(code).then(() => showToast('已复制'));
+  navigator.clipboard.writeText(code).then(() => {
+    showToast('已复制');
+    const hint = document.getElementById(`hint-${id}`);
+    if (hint) { hint.textContent = '✓ 已复制'; setTimeout(() => { if (hint) hint.textContent = '点击复制'; }, 1500); }
+  });
 }
 
-function deleteAccount(id: string) {
-  if (confirm('确定删除这个账号？')) {
-    accounts = accounts.filter(a => a.id !== id);
-    saveAccounts(accounts);
-    render();
-  }
+function openEdit(id: string) {
+  currentEditId = id;
+  currentView = 'edit';
+  render();
 }
 
-// ===================== 渲染：添加/编辑表单 =====================
-function renderEdit(app: HTMLElement) {
-  const isNew = editingId === 'new';
-  const existing = isNew ? null : accounts.find(a => a.id === editingId);
+function startAddTemplate(tpl: Template) {
+  currentView = 'add';
+  render();
+  // 预填模板
+  const tplInput = document.getElementById('f-template') as HTMLSelectElement;
+  const labelInput = document.getElementById('f-label') as HTMLInputElement;
+  if (tplInput) tplInput.value = tpl.id;
+  if (labelInput) labelInput.placeholder = tpl.labelHint;
+}
 
-  app.innerHTML = `
+// ===================== 视图：添加账号 =====================
+function renderAdd(app: HTMLElement) {
+  const html = `
     <div class="header">
-      <h1>${isNew ? '添加账号' : '编辑账号'}</h1>
+      <h1>添加账号</h1>
       <button class="back-btn" id="backbtn">取消</button>
     </div>
     <div class="form">
       <div class="form-group">
-        <label>粘贴 otpauth:// URI</label>
-        <textarea id="f-uri" rows="3" placeholder="从网站粘贴密钥链接，如&#10;otpauth://totp/GitHub:zhangsan?secret=...&issuer=GitHub"></textarea>
-      </div>
-      <div class="form-divider">
-        <span>或手动填写</span>
+        <label>模板</label>
+        <div class="template-pills">
+          <button class="tpl-pill active" data-tpl="">自定义</button>
+          ${TEMPLATES.map(t => `
+            <button class="tpl-pill" data-tpl="${t.id}">${t.icon} ${t.name}</button>
+          `).join('')}
+        </div>
       </div>
       <div class="form-group">
+        <label>粘贴 otpauth:// 密钥链接</label>
+        <textarea id="f-uri" rows="2" placeholder="从设置页面复制，如&#10;otpauth://totp/GitHub:username?secret=JBSWY...&issuer=GitHub"></textarea>
+      </div>
+      <div class="form-divider"><span>或手动填写</span></div>
+      <div class="form-group">
         <label>名称</label>
-        <input id="f-label" type="text" placeholder="如：GitHub" value="${escapeHtml(existing?.label || '')}" />
+        <input id="f-label" type="text" placeholder="如：GitHub" />
       </div>
       <div class="form-group">
         <label>密钥</label>
@@ -180,30 +255,46 @@ function renderEdit(app: HTMLElement) {
       <button class="save-btn" id="savebtn">保存</button>
     </div>
   `;
+  app.innerHTML = html;
 
-  document.getElementById('backbtn')!.onclick = () => {
-    editingId = null;
-    render();
-  };
+  let activeTemplate = '';
 
+  document.getElementById('backbtn')!.onclick = () => { currentView = 'list'; render(); };
+
+  // 模板切换
+  for (const t of TEMPLATES) {
+    document.querySelector(`[data-tpl="${t.id}"]`)!.addEventListener('click', () => {
+      activeTemplate = t.id;
+      document.querySelectorAll('.tpl-pill').forEach(el => el.classList.remove('active'));
+      document.querySelector(`[data-tpl="${t.id}"]`)!.classList.add('active');
+      const labelInput = document.getElementById('f-label') as HTMLInputElement;
+      if (labelInput) labelInput.placeholder = t.labelHint;
+    });
+  }
+  document.querySelector('[data-tpl=""]')!.addEventListener('click', () => {
+    activeTemplate = '';
+    document.querySelectorAll('.tpl-pill').forEach(el => el.classList.remove('active'));
+    document.querySelector('[data-tpl=""]')!.classList.add('active');
+    const labelInput = document.getElementById('f-label') as HTMLInputElement;
+    if (labelInput) labelInput.placeholder = '如：GitHub';
+  });
+
+  // URI 解析
   const uriInput = document.getElementById('f-uri') as HTMLTextAreaElement;
   const labelInput = document.getElementById('f-label') as HTMLInputElement;
   const secretInput = document.getElementById('f-secret') as HTMLInputElement;
 
-  // otpauth URI 自动解析
   uriInput.addEventListener('input', () => {
     const uri = uriInput.value.trim();
     if (!uri.startsWith('otpauth://')) return;
     try {
       const t = OTP.URI.parse(uri) as OTP.TOTP;
-      // 去掉 issuer: 前缀
-      labelInput.value = t.label.includes(':')
-        ? t.label.split(':')[1].trim()
-        : t.label;
+      const label = t.label.includes(':') ? t.label.split(':')[1].trim() : t.label;
+      labelInput.value = label;
       secretInput.value = t.secret.base32;
-      showToast('已解析完成，确认后保存');
-    } catch (e) {
-      showToast('URI 解析失败');
+      showToast('已解析 ✓');
+    } catch {
+      showToast('解析失败');
     }
   });
 
@@ -216,25 +307,81 @@ function renderEdit(app: HTMLElement) {
       return;
     }
 
+    const tpl = TEMPLATES.find(t => t.id === activeTemplate);
+    const issuer = tpl ? tpl.issuer : label;
+
     const account: Account = {
-      id: isNew ? Date.now().toString() : (editingId as string),
+      id: Date.now().toString(),
       label,
-      issuer: label.split(':')[0] || label,
+      issuer,
       secret,
-      digits: 6,
-      period: 30,
-      algorithm: 'SHA1',
+      digits: tpl?.digits ?? 6,
+      period: tpl?.period ?? 30,
+      algorithm: tpl?.algorithm ?? 'SHA1',
     };
 
-    if (isNew) {
-      accounts.push(account);
-    } else {
-      const idx = accounts.findIndex(a => a.id === editingId);
-      if (idx >= 0) accounts[idx] = account;
-    }
-
+    accounts.push(account);
     saveAccounts(accounts).then(() => {
-      editingId = null;
+      currentView = 'list';
+      render();
+    });
+  };
+}
+
+// ===================== 视图：编辑/删除 =====================
+function renderEdit(app: HTMLElement) {
+  const acc = accounts.find(a => a.id === currentEditId);
+  if (!acc) { currentView = 'list'; render(); return; }
+
+  const html = `
+    <div class="header">
+      <h1>编辑账号</h1>
+      <button class="back-btn" id="backbtn">返回</button>
+    </div>
+    <div class="form">
+      <div class="form-group">
+        <label>名称</label>
+        <input id="f-label" type="text" value="${escapeHtml(acc.label)}" />
+      </div>
+      <div class="form-group">
+        <label>颁发者</label>
+        <input id="f-issuer" type="text" value="${escapeHtml(acc.issuer)}" />
+      </div>
+      <div class="form-group">
+        <label>密钥</label>
+        <input id="f-secret" type="text" value="${escapeHtml(acc.secret)}" />
+      </div>
+      <button class="delete-btn-full" id="deletebtn">删除此账号</button>
+      <button class="save-btn" id="savebtn">保存</button>
+    </div>
+  `;
+  app.innerHTML = html;
+
+  document.getElementById('backbtn')!.onclick = () => { currentView = 'list'; render(); };
+
+  document.getElementById('deletebtn')!.onclick = () => {
+    if (confirm(`确定删除「${acc.label}」？`)) {
+      accounts = accounts.filter(a => a.id !== currentEditId);
+      saveAccounts(accounts).then(() => { currentView = 'list'; currentEditId = null; render(); });
+    }
+  };
+
+  document.getElementById('savebtn')!.onclick = () => {
+    const labelInput = document.getElementById('f-label') as HTMLInputElement;
+    const issuerInput = document.getElementById('f-issuer') as HTMLInputElement;
+    const secretInput = document.getElementById('f-secret') as HTMLInputElement;
+
+    const label = labelInput.value.trim();
+    const secret = secretInput.value.trim().toUpperCase().replace(/[^A-Z2-7=]/g, '');
+    if (!label || !secret) { showToast('名称和密钥不能为空'); return; }
+
+    const idx = accounts.findIndex(a => a.id === currentEditId);
+    if (idx >= 0) {
+      accounts[idx] = { ...accounts[idx], label, issuer: issuerInput.value.trim() || label, secret };
+    }
+    saveAccounts(accounts).then(() => {
+      currentView = 'list';
+      currentEditId = null;
       render();
     });
   };
@@ -271,9 +418,7 @@ async function main() {
 function refreshCodes() {
   for (const acc of accounts) {
     const codeEl = document.getElementById(`code-${acc.id}`);
-    if (codeEl) {
-      codeEl.textContent = generateTOTP(acc).replace(/(.{3})/g, '$1 ').trim();
-    }
+    if (codeEl) codeEl.textContent = generateTOTP(acc).replace(/(.{3})/g, '$1 ').trim();
   }
 }
 
