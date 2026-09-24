@@ -58,7 +58,7 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ===================== 渲染 =====================
+// ===================== 渲染：账号列表 =====================
 function render() {
   const app = document.getElementById('app')!;
   const timeLeft = getTimeLeft();
@@ -73,7 +73,7 @@ function render() {
 
   let html = `
     <div class="header">
-      <h1>🔐 TOTP 验证器</h1>
+      <h1>TOTP</h1>
     </div>
     <div class="account-list">
   `;
@@ -92,7 +92,7 @@ function render() {
       html += `
         <div class="card" id="card-${acc.id}">
           <div class="card-left">
-            <div class="issuer">${escapeHtml(acc.issuer || 'Unknown')}</div>
+            <div class="issuer">${escapeHtml(acc.issuer || acc.label)}</div>
             <div class="label">${escapeHtml(acc.label)}</div>
           </div>
           <div class="code-block">
@@ -105,20 +105,24 @@ function render() {
     }
   }
 
-  html += `
-    </div>
-    <div class="progress-bar-wrap">
-      <div class="progress-bar-bg">
-        <div class="progress-bar-fill" id="pbar" style="width:${(progress * 100).toFixed(1)}%;background:${ringColor}"></div>
+  html += `</div>`;
+
+  // 有账号才显示进度条
+  if (accounts.length > 0) {
+    html += `
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="pbar" style="width:${(progress * 100).toFixed(1)}%;background:${ringColor}"></div>
+        </div>
+        <div class="time-left" id="timeleft" style="color:${ringColor}">${timeLeft}s</div>
       </div>
-      <div class="time-left" id="timeleft" style="color:${ringColor}">${timeLeft}s</div>
-    </div>
-    <button class="add-btn" id="addbtn">+ 添加账号</button>
-  `;
+    `;
+  }
+
+  html += `<button class="add-btn" id="addbtn">+ 添加账号</button>`;
 
   app.innerHTML = html;
 
-  // 绑定事件
   for (const acc of accounts) {
     document.getElementById(`card-${acc.id}`)!.onclick = () => copyCode(acc.id);
     document.getElementById(`del-${acc.id}`)!.onclick = (e) => {
@@ -126,14 +130,17 @@ function render() {
       deleteAccount(acc.id);
     };
   }
-  document.getElementById('addbtn')!.onclick = () => showAdd();
+  document.getElementById('addbtn')!.onclick = () => {
+    editingId = 'new';
+    render();
+  };
 }
 
 function copyCode(id: string) {
   const acc = accounts.find(a => a.id === id);
   if (!acc) return;
   const code = generateTOTP(acc);
-  navigator.clipboard.writeText(code).then(() => showToast('已复制: ' + code));
+  navigator.clipboard.writeText(code).then(() => showToast('已复制'));
 }
 
 function deleteAccount(id: string) {
@@ -144,68 +151,35 @@ function deleteAccount(id: string) {
   }
 }
 
-function showAdd() {
-  editingId = 'new';
-  render();
-}
-
-// ===================== 编辑/添加表单 =====================
+// ===================== 渲染：添加/编辑表单 =====================
 function renderEdit(app: HTMLElement) {
   const isNew = editingId === 'new';
   const existing = isNew ? null : accounts.find(a => a.id === editingId);
 
-  const html = `
+  app.innerHTML = `
     <div class="header">
-      <h1>${isNew ? '➕ 添加账号' : '✏️ 编辑账号'}</h1>
-      <button class="back-btn" id="backbtn">← 返回</button>
+      <h1>${isNew ? '添加账号' : '编辑账号'}</h1>
+      <button class="back-btn" id="backbtn">取消</button>
     </div>
     <div class="form">
+      <div class="form-group">
+        <label>粘贴 otpauth:// URI</label>
+        <textarea id="f-uri" rows="3" placeholder="从网站粘贴密钥链接，如&#10;otpauth://totp/GitHub:zhangsan?secret=...&issuer=GitHub"></textarea>
+      </div>
+      <div class="form-divider">
+        <span>或手动填写</span>
+      </div>
       <div class="form-group">
         <label>名称</label>
         <input id="f-label" type="text" placeholder="如：GitHub" value="${escapeHtml(existing?.label || '')}" />
       </div>
       <div class="form-group">
-        <label>颁发者</label>
-        <input id="f-issuer" type="text" placeholder="如：GitHub.com" value="${escapeHtml(existing?.issuer || '')}" />
-      </div>
-      <div class="form-group">
-        <label>密钥 (Secret)</label>
+        <label>密钥</label>
         <input id="f-secret" type="text" placeholder="Base32 密钥，如 JBSWY3DPEHPK3PXP" />
-      </div>
-      <div class="form-group">
-        <label>位数</label>
-        <select id="f-digits">
-          <option value="6" ${(existing?.digits || 6) === 6 ? 'selected' : ''}>6 位</option>
-          <option value="8" ${existing?.digits === 8 ? 'selected' : ''}>8 位</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>周期（秒）</label>
-        <select id="f-period">
-          <option value="30" ${(existing?.period || 30) === 30 ? 'selected' : ''}>30 秒</option>
-          <option value="60" ${existing?.period === 60 ? 'selected' : ''}>60 秒</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>算法</label>
-        <select id="f-algo">
-          <option value="SHA1" ${(existing?.algorithm || 'SHA1') === 'SHA1' ? 'selected' : ''}>SHA1（常用）</option>
-          <option value="SHA256" ${existing?.algorithm === 'SHA256' ? 'selected' : ''}>SHA256</option>
-          <option value="SHA512" ${existing?.algorithm === 'SHA512' ? 'selected' : ''}>SHA512</option>
-        </select>
-      </div>
-      <div class="form-tips">
-        💡 支持粘贴 otpauth:// URI，会自动解析填充所有字段
-      </div>
-      <div class="form-group">
-        <label>或粘贴 otpauth:// URI</label>
-        <textarea id="f-uri" rows="2" placeholder="otpauth://totp/GitHub:user@example.com?secret=...&issuer=GitHub"></textarea>
       </div>
       <button class="save-btn" id="savebtn">保存</button>
     </div>
   `;
-
-  app.innerHTML = html;
 
   document.getElementById('backbtn')!.onclick = () => {
     editingId = null;
@@ -214,11 +188,7 @@ function renderEdit(app: HTMLElement) {
 
   const uriInput = document.getElementById('f-uri') as HTMLTextAreaElement;
   const labelInput = document.getElementById('f-label') as HTMLInputElement;
-  const issuerInput = document.getElementById('f-issuer') as HTMLInputElement;
   const secretInput = document.getElementById('f-secret') as HTMLInputElement;
-  const digitsInput = document.getElementById('f-digits') as HTMLSelectElement;
-  const periodInput = document.getElementById('f-period') as HTMLSelectElement;
-  const algoInput = document.getElementById('f-algo') as HTMLSelectElement;
 
   // otpauth URI 自动解析
   uriInput.addEventListener('input', () => {
@@ -226,21 +196,20 @@ function renderEdit(app: HTMLElement) {
     if (!uri.startsWith('otpauth://')) return;
     try {
       const t = OTP.URI.parse(uri) as OTP.TOTP;
-      labelInput.value = t.label;
-      issuerInput.value = t.issuer || '';
+      // 去掉 issuer: 前缀
+      labelInput.value = t.label.includes(':')
+        ? t.label.split(':')[1].trim()
+        : t.label;
       secretInput.value = t.secret.base32;
-      digitsInput.value = String(t.digits);
-      periodInput.value = String(t.period);
-      if (t.algorithm) algoInput.value = t.algorithm;
+      showToast('已解析完成，确认后保存');
     } catch (e) {
-      console.error('URI 解析失败', e);
+      showToast('URI 解析失败');
     }
   });
 
   document.getElementById('savebtn')!.onclick = () => {
     const label = labelInput.value.trim();
-    const issuer = issuerInput.value.trim();
-    const secret = secretInput.value.trim().toUpperCase().replace(/[^A-Z2-7]/g, '');
+    const secret = secretInput.value.trim().toUpperCase().replace(/[^A-Z2-7=]/g, '');
 
     if (!label || !secret) {
       showToast('请填写名称和密钥');
@@ -250,11 +219,11 @@ function renderEdit(app: HTMLElement) {
     const account: Account = {
       id: isNew ? Date.now().toString() : (editingId as string),
       label,
-      issuer,
+      issuer: label.split(':')[0] || label,
       secret,
-      digits: parseInt(digitsInput.value),
-      period: parseInt(periodInput.value),
-      algorithm: algoInput.value,
+      digits: 6,
+      period: 30,
+      algorithm: 'SHA1',
     };
 
     if (isNew) {
@@ -287,7 +256,6 @@ async function main() {
   accounts = await loadAccounts();
   render();
 
-  // 每秒更新时间
   setInterval(() => {
     const tl = getTimeLeft();
     const progress = tl / 30;
@@ -296,8 +264,6 @@ async function main() {
     const pbEl = document.getElementById('pbar');
     if (tlEl) { tlEl.style.color = color; tlEl.textContent = tl + 's'; }
     if (pbEl) { pbEl.style.width = (progress * 100) + '%'; pbEl.style.background = color; }
-
-    // 每30秒刷新验证码
     if (tl === 30) refreshCodes();
   }, 1000);
 }
