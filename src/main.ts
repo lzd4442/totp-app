@@ -69,7 +69,7 @@ function render() {
   }
 
   const progress = timeLeft / 30;
-  const ringColor = timeLeft <= 5 ? '#ef4444' : timeLeft <= 10 ? '#f59e0b' : '#22c55e';
+  const ringColor = timeLeft <= 5 ? '#b3261e' : timeLeft <= 10 ? '#c78100' : '#2e7d32';
 
   let html = `
     <div class="header">
@@ -291,7 +291,7 @@ async function main() {
   setInterval(() => {
     const tl = getTimeLeft();
     const progress = tl / 30;
-    const color = tl <= 5 ? '#ef4444' : tl <= 10 ? '#f59e0b' : '#22c55e';
+    const color = tl <= 5 ? '#b3261e' : tl <= 10 ? '#c78100' : '#2e7d32';
     const tlEl = document.getElementById('timeleft');
     const pbEl = document.getElementById('pbar');
     if (tlEl) { tlEl.style.color = color; tlEl.textContent = tl + 's'; }
