@@ -24,7 +24,7 @@ interface Template {
   algorithm: string;
 }
 
-type View = 'list' | 'add' | 'edit';
+type View = 'list' | 'add' | 'detail';
 
 // ===================== 内置 SVG 图标 =====================
 const ICON_GITHUB = `<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="6" fill="#24292f"/><path d="M16 6C10.477 6 6 10.477 6 16c0 4.418 2.865 8.166 6.84 9.49.5.09.68-.217.68-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0116 10.5c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .268.18.578.688.48C23.137 24.164 26 20.416 26 16c0-5.523-4.477-10-10-10z" fill="#fff"/></svg>`;
@@ -86,11 +86,12 @@ async function saveAccounts(accounts: Account[]): Promise<void> {
 // ===================== UI 状态 =====================
 let accounts: Account[] = [];
 let currentView: View = 'list';
-let currentEditId: string | null = null;
-let selectedTemplate: Template = TEMPLATES[2]; // 默认自定义
+let currentDetailId: string | null = null;
+let selectedTemplate: Template = TEMPLATES[2];
 
 // ===================== TOTP =====================
 function generateTOTP(account: Account): string {
+  if (!account.secret) return '';
   try {
     const totp = new OTP.TOTP({
       issuer: account.issuer || 'Unknown',
@@ -102,8 +103,12 @@ function generateTOTP(account: Account): string {
     });
     return totp.generate();
   } catch {
-    return '------';
+    return '';
   }
+}
+
+function hasSecret(account: Account): boolean {
+  return !!account.secret && account.secret.length >= 8;
 }
 
 function getTimeLeft(): number {
@@ -119,7 +124,7 @@ function render() {
   const app = document.getElementById('app')!;
   if (currentView === 'list') renderList(app);
   else if (currentView === 'add') renderAdd(app);
-  else if (currentView === 'edit') renderEdit(app);
+  else if (currentView === 'detail') renderDetail(app);
 }
 
 // ===================== 视图：账号列表 =====================
@@ -153,22 +158,25 @@ function renderList(app: HTMLElement) {
     `;
   } else {
     for (const acc of accounts) {
-      const code = generateTOTP(acc);
-      const formatted = code.replace(/(.{3})/g, '$1 ').trim();
+      const active = hasSecret(acc);
+      const code = active ? generateTOTP(acc) : '';
+      const formatted = active ? code.replace(/(.{3})/g, '$1 ').trim() : '';
+      const statusClass = active ? 'card-active' : 'card-inactive';
+      const codeDisplay = active
+        ? `<div class="code" id="code-${acc.id}">${formatted}</div><div class="copy-hint" id="hint-${acc.id}">点击复制</div>`
+        : `<div class="code-inactive">待填写密钥</div>`;
+
       html += `
-        <div class="card" data-id="${acc.id}">
+        <div class="card ${statusClass}" data-id="${acc.id}">
           <div class="card-body">
             <div class="card-left">
               <div class="issuer">${escapeHtml(acc.issuer)}</div>
               <div class="label">${escapeHtml(acc.label)}</div>
             </div>
-            <div class="code-block">
-              <div class="code" id="code-${acc.id}">${formatted}</div>
-              <div class="copy-hint" id="hint-${acc.id}">点击复制</div>
-            </div>
+            <div class="code-block">${codeDisplay}</div>
           </div>
-          <div class="card-edit" id="edit-${acc.id}">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          <div class="card-arrow">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
           </div>
         </div>
       `;
@@ -177,7 +185,7 @@ function renderList(app: HTMLElement) {
 
   html += `</div>`;
 
-  if (accounts.length > 0) {
+  if (accounts.length > 0 && accounts.some(a => hasSecret(a))) {
     html += `
       <div class="progress-bar-wrap">
         <div class="progress-bar-bg">
@@ -192,7 +200,11 @@ function renderList(app: HTMLElement) {
 
   app.innerHTML = html;
 
-  document.getElementById('addbtn')!.onclick = () => { currentView = 'add'; selectedTemplate = TEMPLATES[2]; render(); };
+  document.getElementById('addbtn')!.onclick = () => {
+    selectedTemplate = TEMPLATES[2];
+    currentView = 'add';
+    render();
+  };
 
   if (accounts.length === 0) {
     for (const t of TEMPLATES.filter(t => t.id !== 'custom')) {
@@ -204,37 +216,21 @@ function renderList(app: HTMLElement) {
     }
   } else {
     for (const acc of accounts) {
-      document.querySelector(`[data-id="${acc.id}"]`)!.addEventListener('click', (e) => {
-        if ((e.target as HTMLElement).closest('.card-edit')) {
-          openEdit(acc.id);
-        } else {
-          copyCode(acc.id);
-        }
+      document.querySelector(`[data-id="${acc.id}"]`)!.addEventListener('click', () => {
+        openDetail(acc.id);
       });
     }
   }
 }
 
-function copyCode(id: string) {
-  const acc = accounts.find(a => a.id === id);
-  if (!acc) return;
-  const code = generateTOTP(acc);
-  navigator.clipboard.writeText(code).then(() => {
-    showToast('已复制');
-    const hint = document.getElementById(`hint-${id}`);
-    if (hint) { hint.textContent = '✓ 已复制'; setTimeout(() => { if (hint) hint.textContent = '点击复制'; }, 1500); }
-  });
-}
-
-function openEdit(id: string) {
-  currentEditId = id;
-  currentView = 'edit';
+function openDetail(id: string) {
+  currentDetailId = id;
+  currentView = 'detail';
   render();
 }
 
 // ===================== 视图：添加账号 =====================
 function renderAdd(app: HTMLElement) {
-  const isCustom = selectedTemplate.id === 'custom';
   const tplName = selectedTemplate.name;
 
   const templateButtons = TEMPLATES.map(t => `
@@ -243,31 +239,6 @@ function renderAdd(app: HTMLElement) {
       ${t.name}
     </button>
   `).join('');
-
-  const advancedSettings = isCustom ? `
-    <div class="form-group">
-      <label>位数</label>
-      <select id="f-digits">
-        <option value="6" selected>6 位</option>
-        <option value="8">8 位</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>周期</label>
-      <select id="f-period">
-        <option value="30" selected>30 秒</option>
-        <option value="60">60 秒</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label>算法</label>
-      <select id="f-algo">
-        <option value="SHA1" selected>SHA1</option>
-        <option value="SHA256">SHA256</option>
-        <option value="SHA512">SHA512</option>
-      </select>
-    </div>
-  ` : '';
 
   app.innerHTML = `
     <div class="header">
@@ -280,20 +251,11 @@ function renderAdd(app: HTMLElement) {
         <div class="template-pills">${templateButtons}</div>
       </div>
       <div class="form-group">
-        <label>粘贴 otpauth:// 密钥链接</label>
-        <textarea id="f-uri" rows="2" placeholder="从设置页面复制，如&#10;otpauth://totp/${selectedTemplate.issuer}:username?secret=***"></textarea>
-      </div>
-      <div class="form-divider"><span>或手动填写</span></div>
-      <div class="form-group">
         <label>名称</label>
         <input id="f-label" type="text" placeholder="${selectedTemplate.labelHint}" />
       </div>
-      <div class="form-group">
-        <label>密钥</label>
-        <input id="f-secret" type="text" placeholder="Base32 密钥，如 JBSWY3DPEHPK3PXP" />
-      </div>
-      ${advancedSettings}
-      <button class="save-btn" id="savebtn">保存</button>
+      <div class="form-divider"><span>密钥在点卡片进去后填写</span></div>
+      <button class="save-btn" id="savebtn">添加</button>
     </div>
   `;
 
@@ -308,49 +270,22 @@ function renderAdd(app: HTMLElement) {
     });
   }
 
-  const uriInput = document.getElementById('f-uri') as HTMLTextAreaElement;
-  const labelInput = document.getElementById('f-label') as HTMLInputElement;
-  const secretInput = document.getElementById('f-secret') as HTMLInputElement;
-
-  // URI 自动解析
-  uriInput.addEventListener('input', () => {
-    const uri = uriInput.value.trim();
-    if (!uri.startsWith('otpauth://')) return;
-    try {
-      const t = OTP.URI.parse(uri) as OTP.TOTP;
-      const label = t.label.includes(':') ? t.label.split(':')[1].trim() : t.label;
-      labelInput.value = label;
-      secretInput.value = t.secret.base32;
-      showToast('已解析 ✓');
-    } catch {
-      showToast('解析失败');
-    }
-  });
-
   document.getElementById('savebtn')!.onclick = () => {
+    const labelInput = document.getElementById('f-label') as HTMLInputElement;
     const label = labelInput.value.trim();
-    const secret = secretInput.value.trim().toUpperCase().replace(/[^A-Z2-7=]/g, '');
 
-    if (!label || !secret) { showToast('请填写名称和密钥'); return; }
+    if (!label) { showToast('请填写名称'); return; }
 
-    const tpl = selectedTemplate;
-    const issuer = tpl.id === 'custom' ? label : tpl.issuer;
-
-    let digits = tpl.digits, period = tpl.period, algorithm = tpl.algorithm;
-    if (tpl.id === 'custom') {
-      digits = parseInt((document.getElementById('f-digits') as HTMLSelectElement).value);
-      period = parseInt((document.getElementById('f-period') as HTMLSelectElement).value);
-      algorithm = (document.getElementById('f-algo') as HTMLSelectElement).value;
-    }
+    const issuer = selectedTemplate.id === 'custom' ? label : selectedTemplate.issuer;
 
     const account: Account = {
       id: Date.now().toString(),
       label,
       issuer,
-      secret,
-      digits,
-      period,
-      algorithm,
+      secret: '', // 密钥暂时为空，点卡片进去填
+      digits: selectedTemplate.digits,
+      period: selectedTemplate.period,
+      algorithm: selectedTemplate.algorithm,
     };
 
     accounts.push(account);
@@ -361,66 +296,102 @@ function renderAdd(app: HTMLElement) {
   };
 }
 
-// ===================== 视图：编辑/删除 =====================
-function renderEdit(app: HTMLElement) {
-  const acc = accounts.find(a => a.id === currentEditId);
+// ===================== 视图：账号详情（填密钥 / 复制 / 编辑）=====================
+function renderDetail(app: HTMLElement) {
+  const acc = accounts.find(a => a.id === currentDetailId);
   if (!acc) { currentView = 'list'; render(); return; }
+
+  const active = hasSecret(acc);
+  const code = active ? generateTOTP(acc) : '';
+  const formatted = active ? code.replace(/(.{3})/g, '$1 ').trim() : '';
 
   app.innerHTML = `
     <div class="header">
-      <h1>编辑账号</h1>
+      <h1>${escapeHtml(acc.issuer)}</h1>
       <button class="back-btn" id="backbtn">返回</button>
     </div>
-    <div class="form">
-      <div class="form-group">
-        <label>名称</label>
-        <input id="f-label" type="text" value="${escapeHtml(acc.label)}" />
+    <div class="detail-view">
+      <div class="detail-name">${escapeHtml(acc.label)}</div>
+
+      ${active ? `
+        <div class="detail-code-wrap">
+          <div class="detail-code" id="detail-code">${formatted}</div>
+          <div class="detail-copy-btn" id="copybtn">复制</div>
+        </div>
+        <div class="detail-hint" id="detail-hint">点击复制</div>
+      ` : `
+        <div class="detail-code-inactive">待填写密钥</div>
+      `}
+
+      <div class="form" style="margin-top:32px">
+        <div class="form-group">
+          <label>粘贴 otpauth:// 密钥链接</label>
+          <textarea id="f-uri" rows="2" placeholder="从设置页面复制，如&#10;otpauth://totp/${acc.issuer}:${acc.label}?secret=***"></textarea>
+        </div>
+        <div class="form-divider"><span>或手动填写密钥</span></div>
+        <div class="form-group">
+          <label>密钥</label>
+          <input id="f-secret" type="text" value="${escapeHtml(acc.secret)}" placeholder="Base32 密钥，如 JBSWY3DPEHPK3PXP" />
+        </div>
+        <button class="save-btn" id="savebtn">${acc.secret ? '更新密钥' : '保存密钥'}</button>
+        <button class="delete-btn-full" id="deletebtn">删除此账号</button>
       </div>
-      <div class="form-group">
-        <label>颁发者</label>
-        <input id="f-issuer" type="text" value="${escapeHtml(acc.issuer)}" />
-      </div>
-      <div class="form-group">
-        <label>密钥</label>
-        <input id="f-secret" type="text" value="${escapeHtml(acc.secret)}" />
-      </div>
-      <button class="delete-btn-full" id="deletebtn">删除此账号</button>
-      <button class="save-btn" id="savebtn">保存</button>
     </div>
   `;
 
   document.getElementById('backbtn')!.onclick = () => { currentView = 'list'; render(); };
 
-  document.getElementById('deletebtn')!.onclick = () => {
-    if (confirm(`确定删除「${acc.label}」？`)) {
-      accounts = accounts.filter(a => a.id !== currentEditId);
-      saveAccounts(accounts).then(() => {
-        currentView = 'list';
-        currentEditId = null;
-        render();
+  // 复制按钮
+  if (active) {
+    document.getElementById('copybtn')!.addEventListener('click', () => {
+      navigator.clipboard.writeText(code).then(() => {
+        const hint = document.getElementById('detail-hint')!;
+        hint.textContent = '✓ 已复制';
+        setTimeout(() => { hint.textContent = '点击复制'; }, 1500);
       });
+    });
+  }
+
+  // URI 解析
+  const uriInput = document.getElementById('f-uri') as HTMLTextAreaElement;
+  const secretInput = document.getElementById('f-secret') as HTMLInputElement;
+
+  uriInput.addEventListener('input', () => {
+    const uri = uriInput.value.trim();
+    if (!uri.startsWith('otpauth://')) return;
+    try {
+      const t = OTP.URI.parse(uri) as OTP.TOTP;
+      secretInput.value = t.secret.base32;
+      showToast('已解析 ✓');
+    } catch {
+      showToast('解析失败');
     }
-  };
+  });
 
   document.getElementById('savebtn')!.onclick = () => {
-    const labelInput = document.getElementById('f-label') as HTMLInputElement;
-    const issuerInput = document.getElementById('f-issuer') as HTMLInputElement;
-    const secretInput = document.getElementById('f-secret') as HTMLInputElement;
-
-    const label = labelInput.value.trim();
     const secret = secretInput.value.trim().toUpperCase().replace(/[^A-Z2-7=]/g, '');
-    if (!label || !secret) { showToast('名称和密钥不能为空'); return; }
+    if (!secret) { showToast('请填写密钥'); return; }
 
-    const idx = accounts.findIndex(a => a.id === currentEditId);
+    const idx = accounts.findIndex(a => a.id === currentDetailId);
     if (idx >= 0) {
-      accounts[idx] = { ...accounts[idx], label, issuer: issuerInput.value.trim() || label, secret };
+      accounts[idx] = { ...accounts[idx], secret };
     }
     saveAccounts(accounts).then(() => {
-      currentView = 'list';
-      currentEditId = null;
+      showToast('已保存 ✓');
       render();
     });
   };
+
+  document.getElementById('deletebtn')!.addEventListener('click', () => {
+    if (confirm(`确定删除「${acc.label}」？`)) {
+      accounts = accounts.filter(a => a.id !== currentDetailId);
+      saveAccounts(accounts).then(() => {
+        currentView = 'list';
+        currentDetailId = null;
+        render();
+      });
+    }
+  });
 }
 
 // ===================== Toast =====================
@@ -453,8 +424,16 @@ async function main() {
 
 function refreshCodes() {
   for (const acc of accounts) {
+    if (!hasSecret(acc)) continue;
     const codeEl = document.getElementById(`code-${acc.id}`);
-    if (codeEl) codeEl.textContent = generateTOTP(acc).replace(/(.{3})/g, '$1 ').trim();
+    if (codeEl) {
+      const code = generateTOTP(acc).replace(/(.{3})/g, '$1 ').trim();
+      codeEl.textContent = code;
+    }
+    const detailCode = document.getElementById('detail-code');
+    if (detailCode) {
+      detailCode.textContent = generateTOTP(acc).replace(/(.{3})/g, '$1 ').trim();
+    }
   }
 }
 
