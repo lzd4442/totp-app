@@ -16,7 +16,7 @@ interface Account {
 interface Template {
   id: string;
   name: string;
-  icon: string;
+  iconSvg: string;
   issuer: string;
   labelHint: string;
   digits: number;
@@ -26,14 +26,21 @@ interface Template {
 
 type View = 'list' | 'add' | 'edit';
 
+// ===================== 内置 SVG 图标 =====================
+const ICON_GITHUB = `<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="6" fill="#24292f"/><path d="M16 6C10.477 6 6 10.477 6 16c0 4.418 2.865 8.166 6.84 9.49.5.09.68-.217.68-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0116 10.5c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .268.18.578.688.48C23.137 24.164 26 20.416 26 16c0-5.523-4.477-10-10-10z" fill="#fff"/></svg>`;
+
+const ICON_GITLAB = `<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="6" fill="#FC6D26"/><path d="M16 7L5 13.5l11 6.5 11-6.5L16 7z" fill="#fff"/><path d="M5 13.5v8l11 6.5v-8" fill="#fff"/><path d="M27 13.5v8l-11 6.5v-8" fill="#fff"/><path d="M5 21.5l11 6.5 11-6.5" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+const ICON_CUSTOM = `<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg"><rect width="32" height="32" rx="6" fill="#e7e7e7"/><path d="M16 10v12M10 16h12" stroke="#79747e" stroke-width="2.5" stroke-linecap="round"/></svg>`;
+
 // ===================== 内置模板 =====================
 const TEMPLATES: Template[] = [
   {
     id: 'github',
     name: 'GitHub',
-    icon: '🐙',
+    iconSvg: ICON_GITHUB,
     issuer: 'GitHub',
-    labelHint: 'zhangsan',
+    labelHint: 'username',
     digits: 6,
     period: 30,
     algorithm: 'SHA1',
@@ -41,9 +48,19 @@ const TEMPLATES: Template[] = [
   {
     id: 'gitlab',
     name: 'GitLab',
-    icon: '🦊',
+    iconSvg: ICON_GITLAB,
     issuer: 'GitLab',
-    labelHint: 'zhangsan',
+    labelHint: 'username',
+    digits: 6,
+    period: 30,
+    algorithm: 'SHA1',
+  },
+  {
+    id: 'custom',
+    name: '自定义',
+    iconSvg: ICON_CUSTOM,
+    issuer: '',
+    labelHint: '名称',
     digits: 6,
     period: 30,
     algorithm: 'SHA1',
@@ -51,7 +68,7 @@ const TEMPLATES: Template[] = [
 ];
 
 // ===================== 存储 =====================
-const STORE_KEY = 'totp_accounts';
+const STORE_KEY = '***';
 
 async function loadAccounts(): Promise<Account[]> {
   try {
@@ -63,8 +80,6 @@ async function loadAccounts(): Promise<Account[]> {
 }
 
 async function saveAccounts(accounts: Account[]): Promise<void> {
-  // 注：@capacitor/preferences 在 Android 上存储于 app 私有目录，受系统沙盒保护
-  // 后续可接入原生 KeyStore 插件实现更强加密
   await Preferences.set({ key: STORE_KEY, value: JSON.stringify(accounts) });
 }
 
@@ -72,6 +87,7 @@ async function saveAccounts(accounts: Account[]): Promise<void> {
 let accounts: Account[] = [];
 let currentView: View = 'list';
 let currentEditId: string | null = null;
+let selectedTemplate: Template = TEMPLATES[2]; // 默认自定义
 
 // ===================== TOTP =====================
 function generateTOTP(account: Account): string {
@@ -120,16 +136,15 @@ function renderList(app: HTMLElement) {
   `;
 
   if (accounts.length === 0) {
-    // 空状态
     html += `
       <div class="empty">
         <div class="empty-icon">🔐</div>
         <div class="empty-title">还没有验证码</div>
-        <div class="empty-sub">选择下面的模板快速添加</div>
+        <div class="empty-sub">选择一个服务快速添加</div>
         <div class="template-grid">
-          ${TEMPLATES.map(t => `
+          ${TEMPLATES.filter(t => t.id !== 'custom').map(t => `
             <button class="template-btn" data-template="${t.id}">
-              <span class="tpl-icon">${t.icon}</span>
+              <div class="tpl-icon">${t.iconSvg}</div>
               <span>${t.name}</span>
             </button>
           `).join('')}
@@ -177,19 +192,24 @@ function renderList(app: HTMLElement) {
 
   app.innerHTML = html;
 
-  // 事件绑定
-  document.getElementById('addbtn')!.onclick = () => { currentView = 'add'; render(); };
+  document.getElementById('addbtn')!.onclick = () => { currentView = 'add'; selectedTemplate = TEMPLATES[2]; render(); };
 
   if (accounts.length === 0) {
-    for (const t of TEMPLATES) {
-      document.querySelector(`[data-template="${t.id}"]`)!.addEventListener('click', () => startAddTemplate(t));
+    for (const t of TEMPLATES.filter(t => t.id !== 'custom')) {
+      document.querySelector(`[data-template="${t.id}"]`)!.addEventListener('click', () => {
+        selectedTemplate = t;
+        currentView = 'add';
+        render();
+      });
     }
   } else {
     for (const acc of accounts) {
       document.querySelector(`[data-id="${acc.id}"]`)!.addEventListener('click', (e) => {
-        (e.target as HTMLElement).closest('.card-edit')
-          ? openEdit(acc.id)
-          : copyCode(acc.id);
+        if ((e.target as HTMLElement).closest('.card-edit')) {
+          openEdit(acc.id);
+        } else {
+          copyCode(acc.id);
+        }
       });
     }
   }
@@ -212,78 +232,87 @@ function openEdit(id: string) {
   render();
 }
 
-function startAddTemplate(tpl: Template) {
-  currentView = 'add';
-  render();
-  // 预填模板
-  const tplInput = document.getElementById('f-template') as HTMLSelectElement;
-  const labelInput = document.getElementById('f-label') as HTMLInputElement;
-  if (tplInput) tplInput.value = tpl.id;
-  if (labelInput) labelInput.placeholder = tpl.labelHint;
-}
-
 // ===================== 视图：添加账号 =====================
 function renderAdd(app: HTMLElement) {
-  const html = `
+  const isCustom = selectedTemplate.id === 'custom';
+  const tplName = selectedTemplate.name;
+
+  const templateButtons = TEMPLATES.map(t => `
+    <button class="tpl-pill ${selectedTemplate.id === t.id ? 'active' : ''}" data-tpl="${t.id}">
+      <span class="tpl-pill-icon">${t.iconSvg}</span>
+      ${t.name}
+    </button>
+  `).join('');
+
+  const advancedSettings = isCustom ? `
+    <div class="form-group">
+      <label>位数</label>
+      <select id="f-digits">
+        <option value="6" selected>6 位</option>
+        <option value="8">8 位</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>周期</label>
+      <select id="f-period">
+        <option value="30" selected>30 秒</option>
+        <option value="60">60 秒</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>算法</label>
+      <select id="f-algo">
+        <option value="SHA1" selected>SHA1</option>
+        <option value="SHA256">SHA256</option>
+        <option value="SHA512">SHA512</option>
+      </select>
+    </div>
+  ` : '';
+
+  app.innerHTML = `
     <div class="header">
-      <h1>添加账号</h1>
+      <h1>添加 ${tplName}</h1>
       <button class="back-btn" id="backbtn">取消</button>
     </div>
     <div class="form">
       <div class="form-group">
-        <label>模板</label>
-        <div class="template-pills">
-          <button class="tpl-pill active" data-tpl="">自定义</button>
-          ${TEMPLATES.map(t => `
-            <button class="tpl-pill" data-tpl="${t.id}">${t.icon} ${t.name}</button>
-          `).join('')}
-        </div>
+        <label>选择服务</label>
+        <div class="template-pills">${templateButtons}</div>
       </div>
       <div class="form-group">
         <label>粘贴 otpauth:// 密钥链接</label>
-        <textarea id="f-uri" rows="2" placeholder="从设置页面复制，如&#10;otpauth://totp/GitHub:username?secret=JBSWY...&issuer=GitHub"></textarea>
+        <textarea id="f-uri" rows="2" placeholder="从设置页面复制，如&#10;otpauth://totp/${selectedTemplate.issuer}:username?secret=***"></textarea>
       </div>
       <div class="form-divider"><span>或手动填写</span></div>
       <div class="form-group">
         <label>名称</label>
-        <input id="f-label" type="text" placeholder="如：GitHub" />
+        <input id="f-label" type="text" placeholder="${selectedTemplate.labelHint}" />
       </div>
       <div class="form-group">
         <label>密钥</label>
         <input id="f-secret" type="text" placeholder="Base32 密钥，如 JBSWY3DPEHPK3PXP" />
       </div>
+      ${advancedSettings}
       <button class="save-btn" id="savebtn">保存</button>
     </div>
   `;
-  app.innerHTML = html;
-
-  let activeTemplate = '';
 
   document.getElementById('backbtn')!.onclick = () => { currentView = 'list'; render(); };
 
   // 模板切换
   for (const t of TEMPLATES) {
     document.querySelector(`[data-tpl="${t.id}"]`)!.addEventListener('click', () => {
-      activeTemplate = t.id;
-      document.querySelectorAll('.tpl-pill').forEach(el => el.classList.remove('active'));
-      document.querySelector(`[data-tpl="${t.id}"]`)!.classList.add('active');
-      const labelInput = document.getElementById('f-label') as HTMLInputElement;
-      if (labelInput) labelInput.placeholder = t.labelHint;
+      selectedTemplate = t;
+      currentView = 'add';
+      render();
     });
   }
-  document.querySelector('[data-tpl=""]')!.addEventListener('click', () => {
-    activeTemplate = '';
-    document.querySelectorAll('.tpl-pill').forEach(el => el.classList.remove('active'));
-    document.querySelector('[data-tpl=""]')!.classList.add('active');
-    const labelInput = document.getElementById('f-label') as HTMLInputElement;
-    if (labelInput) labelInput.placeholder = '如：GitHub';
-  });
 
-  // URI 解析
   const uriInput = document.getElementById('f-uri') as HTMLTextAreaElement;
   const labelInput = document.getElementById('f-label') as HTMLInputElement;
   const secretInput = document.getElementById('f-secret') as HTMLInputElement;
 
+  // URI 自动解析
   uriInput.addEventListener('input', () => {
     const uri = uriInput.value.trim();
     if (!uri.startsWith('otpauth://')) return;
@@ -302,22 +331,26 @@ function renderAdd(app: HTMLElement) {
     const label = labelInput.value.trim();
     const secret = secretInput.value.trim().toUpperCase().replace(/[^A-Z2-7=]/g, '');
 
-    if (!label || !secret) {
-      showToast('请填写名称和密钥');
-      return;
-    }
+    if (!label || !secret) { showToast('请填写名称和密钥'); return; }
 
-    const tpl = TEMPLATES.find(t => t.id === activeTemplate);
-    const issuer = tpl ? tpl.issuer : label;
+    const tpl = selectedTemplate;
+    const issuer = tpl.id === 'custom' ? label : tpl.issuer;
+
+    let digits = tpl.digits, period = tpl.period, algorithm = tpl.algorithm;
+    if (tpl.id === 'custom') {
+      digits = parseInt((document.getElementById('f-digits') as HTMLSelectElement).value);
+      period = parseInt((document.getElementById('f-period') as HTMLSelectElement).value);
+      algorithm = (document.getElementById('f-algo') as HTMLSelectElement).value;
+    }
 
     const account: Account = {
       id: Date.now().toString(),
       label,
       issuer,
       secret,
-      digits: tpl?.digits ?? 6,
-      period: tpl?.period ?? 30,
-      algorithm: tpl?.algorithm ?? 'SHA1',
+      digits,
+      period,
+      algorithm,
     };
 
     accounts.push(account);
@@ -333,7 +366,7 @@ function renderEdit(app: HTMLElement) {
   const acc = accounts.find(a => a.id === currentEditId);
   if (!acc) { currentView = 'list'; render(); return; }
 
-  const html = `
+  app.innerHTML = `
     <div class="header">
       <h1>编辑账号</h1>
       <button class="back-btn" id="backbtn">返回</button>
@@ -355,14 +388,17 @@ function renderEdit(app: HTMLElement) {
       <button class="save-btn" id="savebtn">保存</button>
     </div>
   `;
-  app.innerHTML = html;
 
   document.getElementById('backbtn')!.onclick = () => { currentView = 'list'; render(); };
 
   document.getElementById('deletebtn')!.onclick = () => {
     if (confirm(`确定删除「${acc.label}」？`)) {
       accounts = accounts.filter(a => a.id !== currentEditId);
-      saveAccounts(accounts).then(() => { currentView = 'list'; currentEditId = null; render(); });
+      saveAccounts(accounts).then(() => {
+        currentView = 'list';
+        currentEditId = null;
+        render();
+      });
     }
   };
 
