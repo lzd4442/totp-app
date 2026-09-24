@@ -238,6 +238,23 @@ body {
   border-bottom: 1px solid #e7e7e7;
 }
 
+.form-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 20px;
+  color: #b0b0b8;
+  font-size: 12px;
+}
+
+.form-divider::before,
+.form-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: #e7e7e7;
+}
+
 .save-btn {
   width: 100%;
   background: #1c1b1f;
@@ -247,7 +264,7 @@ body {
   font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  margin-top: 12px;
+  margin-top: 24px;
   transition: background 0.1s;
 }
 
