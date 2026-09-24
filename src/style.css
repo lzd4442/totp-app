@@ -105,8 +105,18 @@ body {
   background: #eeeeee;
 }
 
-.tpl-icon {
-  font-size: 28px;
+.tpl-icon svg {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.tpl-pill-icon svg {
+  width: 16px;
+  height: 16px;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 4px;
 }
 
 /* ─── Card ─── */
@@ -302,6 +312,8 @@ body {
 }
 
 .tpl-pill {
+  display: inline-flex;
+  align-items: center;
   padding: 8px 14px;
   background: #f5f5f5;
   border: none;
